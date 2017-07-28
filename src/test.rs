@@ -100,6 +100,7 @@ fn digit_test() {
 
     parse_err("a", digit);
     parse_err("-", digit);
+    parse_err("", digit);
 }
 
 #[test]
@@ -110,6 +111,7 @@ fn alpha_test() {
 
     parse_err("-", alpha);
     parse_err("2", alpha);
+    parse_err("", alpha);
 }
 
 #[test]
@@ -130,4 +132,33 @@ fn alpha_numeric_test() {
 
     parse_err("-", alphanumeric);
     parse_err("@", alphanumeric);
+    parse_err("", alphanumeric);
+}
+
+#[test]
+fn many_test() {
+    assert_eq!(parse_ok("123", many(digit)), vec![1,2,3]);
+    assert_eq!(parse_ok("1", many(digit)), vec![1]);
+    assert_eq!(parse_ok("", many(digit)), vec![]);
+}
+
+#[test]
+fn many1_test() {
+    assert_eq!(parse_ok("123", many1(digit)), vec![1,2,3]);
+    assert_eq!(parse_ok("1", many1(digit)), vec![1]);
+    parse_err("", many1(digit));
+}
+
+#[test]
+fn many_sep_test() {
+    assert_eq!(parse_ok("1,2,3", many_sep(digit, char(','))), vec![1,2,3]);
+    assert_eq!(parse_ok("1", many_sep(digit, char(','))), vec![1]);
+    assert_eq!(parse_ok("", many_sep(digit, char(','))), vec![]);
+}
+
+#[test]
+fn many1_sep_test() {
+    assert_eq!(parse_ok("1,2,3", many1_sep(digit, char(','))), vec![1,2,3]);
+    assert_eq!(parse_ok("1", many1_sep(digit, char(','))), vec![1]);
+    parse_err("", many1_sep(digit, char(',')));
 }

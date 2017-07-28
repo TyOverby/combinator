@@ -256,3 +256,93 @@ where
 {
     Rc::new(a) as Rc<Parser<Output = A::Output>>
 }
+
+pub fn many<A>(a: A) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser {
+    move |mut input: StrTendril| {
+        let mut out = vec![];
+        loop {
+            match a.parse(input.clone()) {
+                Ok((r, n)) => {
+                    out.push(r);
+                    input = n;
+                }
+                Err(_) => break,
+            }
+        }
+        Ok((out, input))
+    }
+}
+
+pub fn many1<A>(a: A) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser {
+    move |mut input: StrTendril| {
+        let mut out = vec![];
+        loop {
+            match a.parse(input.clone()) {
+                Ok((r, n)) => {
+                    out.push(r);
+                    input = n;
+                }
+                Err(e) => {
+                    if out.len() == 0 {  
+                        return Err(e) 
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok((out, input))
+    }
+}
+
+pub fn many_sep<A, B>(a: A, sep: B) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser,
+      B: Parser {
+    move |mut input: StrTendril| {
+        let mut out = vec![];
+        loop {
+            match a.parse(input.clone()) {
+                Ok((r, n)) => {
+                    out.push(r);
+                    if let Ok((_, n)) = sep.parse(n) {
+                        input = n;
+                    } else {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        Ok((out, input))
+    }
+}
+
+pub fn many1_sep<A, B>(a: A, sep: B) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser,
+      B: Parser {
+    move |mut input: StrTendril| {
+        let mut out = vec![];
+        loop {
+            match a.parse(input.clone()) {
+                Ok((r, n)) => {
+                    out.push(r);
+                    if let Ok((_, n)) = sep.parse(n) {
+                        input = n;
+                    } else {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    if out.len() == 0 {
+                        return Err(e)
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok((out, input))
+    }
+}
