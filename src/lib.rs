@@ -239,17 +239,20 @@ where
 // TODO: test this please oh god
 pub fn self_reference<O, R, F>(f: F) -> impl Parser<Output = O>
 where
-    F: FnOnce(Box<Parser<Output=O>>) -> R,
-    R: Parser<Output=O> + 'static,
-    O: 'static
+    F: FnOnce(Box<Parser<Output = O>>) -> R,
+    R: Parser<Output = O> + 'static,
+    O: 'static,
 {
     let parser = Rc::new(RefCell::new(None));
     let weak = Rc::downgrade(&parser);
-    *parser.borrow_mut() = Some(Box::new(f(Box::new(weak))) as Box<Parser<Output=O> + 'static>);
+    *parser.borrow_mut() = Some(Box::new(f(Box::new(weak))) as
+        Box<Parser<Output = O> + 'static>);
     parser
 }
 
 pub fn shared<A>(a: A) -> impl Parser<Output = A::Output> + Clone
-where A: Parser + 'static {
+where
+    A: Parser + 'static,
+{
     Rc::new(a) as Rc<Parser<Output = A::Output>>
 }

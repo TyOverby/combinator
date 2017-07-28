@@ -25,9 +25,7 @@ pub fn digit(input: StrTendril) -> ParseResult<u8> {
 
 pub fn alpha(input: StrTendril) -> ParseResult<char> {
     match input.chars().next() {
-        Some(c) if c.is_alphabetic() => {
-            Ok((c, after(input, c.len_utf8() as u32)))
-        }
+        Some(c) if c.is_alphabetic() => Ok((c, after(input, c.len_utf8() as u32))),
         Some(_) => Err(ParseError::Not("alphabetic")),
         None => Err(ParseError::ReachedEof),
     }
@@ -35,9 +33,7 @@ pub fn alpha(input: StrTendril) -> ParseResult<char> {
 
 pub fn alphanumeric(input: StrTendril) -> ParseResult<char> {
     match input.chars().next() {
-        Some(c) if c.is_alphanumeric() => {
-            Ok((c, after(input, c.len_utf8() as u32)))
-        }
+        Some(c) if c.is_alphanumeric() => Ok((c, after(input, c.len_utf8() as u32))),
         Some(_) => Err(ParseError::Not("alphanumeric")),
         None => Err(ParseError::ReachedEof),
     }
@@ -71,29 +67,43 @@ pub fn identifier(input: StrTendril) -> ParseResult<StrTendril> {
     }
 }
 
-pub fn string(input: StrTendril) -> ParseResult<StrTendril> {
+pub fn string_literal(input: StrTendril) -> ParseResult<StrTendril> {
     let mut escaped = false;
     let mut end = 0;
     let mut first = true;
+    let mut is_closed = false;
 
     for c in input.chars() {
         if first {
             if c != '"' {
-                return Err(ParseError::Not("opening quote"))
+                return Err(ParseError::Not("opening quote"));
             }
             first = false;
+            continue;
         }
 
         match c {
-            '\\' => escaped = !escaped,
-            '"' if !escaped => break,
+            '\\' => {
+                escaped = !escaped;
+            }
+            '"' if !escaped => {
+                is_closed = true;
+                break;
+            }
+            _ if escaped => {
+                escaped = false;
+            }
             _ => {}
         }
         end += c.len_utf8();
     }
 
+    if !is_closed {
+        return Err(ParseError::Not("closing quote"));
+    }
+
     let quote_size = '"'.len_utf8() as u32;
     let left = input.subtendril(quote_size, end as u32);
-    let right = after(input, quote_size + end as u32);
+    let right = after(input, 2 * quote_size + end as u32);
     Ok((left, right))
 }
