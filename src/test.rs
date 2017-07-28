@@ -84,3 +84,50 @@ fn str_lit() {
     parse_err("\"foo", string_literal);
     parse_err("foo", string_literal);
 }
+
+#[test]
+fn digit_test() {
+    assert_eq!(parse_ok("0", digit), 0);
+    assert_eq!(parse_ok("1", digit), 1);
+    assert_eq!(parse_ok("2", digit), 2);
+    assert_eq!(parse_ok("3", digit), 3);
+    assert_eq!(parse_ok("4", digit), 4);
+    assert_eq!(parse_ok("5", digit), 5);
+    assert_eq!(parse_ok("6", digit), 6);
+    assert_eq!(parse_ok("7", digit), 7);
+    assert_eq!(parse_ok("8", digit), 8);
+    assert_eq!(parse_ok("9", digit), 9);
+
+    parse_err("a", digit);
+    parse_err("-", digit);
+}
+
+#[test]
+fn alpha_test() {
+    assert_eq!(parse_ok("a", alpha), 'a');
+    assert_eq!(parse_ok("b", alpha), 'b');
+    assert_eq!(parse_ok("Z", alpha), 'Z');
+
+    parse_err("-", alpha);
+    parse_err("2", alpha);
+}
+
+#[test]
+fn alpha_numeric_test() {
+    assert_eq!(parse_ok("a", alphanumeric), 'a');
+    assert_eq!(parse_ok("b", alphanumeric), 'b');
+    assert_eq!(parse_ok("Z", alphanumeric), 'Z');
+    assert_eq!(parse_ok("0", alphanumeric), '0');
+    assert_eq!(parse_ok("1", alphanumeric), '1');
+    assert_eq!(parse_ok("2", alphanumeric), '2');
+    assert_eq!(parse_ok("3", alphanumeric), '3');
+    assert_eq!(parse_ok("4", alphanumeric), '4');
+    assert_eq!(parse_ok("5", alphanumeric), '5');
+    assert_eq!(parse_ok("6", alphanumeric), '6');
+    assert_eq!(parse_ok("7", alphanumeric), '7');
+    assert_eq!(parse_ok("8", alphanumeric), '8');
+    assert_eq!(parse_ok("9", alphanumeric), '9');
+
+    parse_err("-", alphanumeric);
+    parse_err("@", alphanumeric);
+}
