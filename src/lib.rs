@@ -1,11 +1,21 @@
 #![feature(conservative_impl_trait)]
 extern crate tendril;
 
-use tendril::StrTendril;
+pub mod utilities;
+#[cfg(test)]
+pub mod test;
 
-#[derive(Clone)]
+use tendril::StrTendril;
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
+
+#[derive(Clone, Debug)]
 pub enum ParseError {
-    Bad,
+    RcKerfluffle,
+    ReachedEof,
+    DidNotReachEof,
+    Not(&'static str),
+    ExpectedOther(StrTendril),
     Alternate(Vec<ParseError>),
 }
 
@@ -35,30 +45,55 @@ pub type ParseResult<T> = Result<(T, StrTendril), ParseError>;
 pub trait Parser {
     type Output;
 
-    fn parse(&mut self, input: StrTendril) -> ParseResult<Self::Output>;
+    fn parse(&self, input: StrTendril) -> ParseResult<Self::Output>;
 }
 
-impl <O> Parser for Box<Parser<Output=O>> {
+impl<O> Parser for Box<Parser<Output = O>> {
     type Output = O;
-    fn parse(&mut self, input: StrTendril) -> ParseResult<O> {
-        (&mut **self).parse(input)
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
+        (&**self).parse(input)
     }
 }
 
-/*
-impl <O> Parser for Rc<RefCell<Box<Parser<Output=O>>>> {
+impl<O> Parser for Rc<Parser<Output = O>> {
     type Output = O;
-    fn parse(&mut self, input: StrTendril) -> ParseResult<O> {
-        (&mut **self).parse(input)
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
+        (&**self).parse(input)
     }
-}*/
+}
+
+impl<O> Parser for Rc<RefCell<Option<Box<Parser<Output = O>>>>> {
+    type Output = O;
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
+        match self.borrow().as_ref() {
+            Some(parse_box) => parse_box.parse(input),
+            None => Err(ParseError::RcKerfluffle),
+        }
+    }
+}
+
+
+impl<O> Parser for Weak<RefCell<Option<Box<Parser<Output = O>>>>> {
+    type Output = O;
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
+        match self.upgrade() {
+            Some(rc) => {
+                match rc.borrow().as_ref() {
+                    Some(parse_box) => parse_box.parse(input),
+                    None => Err(ParseError::RcKerfluffle),
+                }
+            } 
+            None => Err(ParseError::RcKerfluffle),
+        }
+    }
+}
 
 impl<R, F> Parser for F
 where
-    F: FnMut(StrTendril) -> ParseResult<R>,
+    F: Fn(StrTendril) -> ParseResult<R>,
 {
     type Output = R;
-    fn parse(&mut self, input: StrTendril) -> ParseResult<R> {
+    fn parse(&self, input: StrTendril) -> ParseResult<R> {
         self(input)
     }
 }
@@ -71,7 +106,7 @@ pub fn string<S: Into<StrTendril>>(s: S) -> impl Parser<Output = StrTendril> {
         let after = input.subtendril(len, input.len32() - len);
         Ok((before, after))
     } else {
-        Err(ParseError::Bad)
+        Err(ParseError::ExpectedOther(s.clone()))
     }
 }
 
@@ -81,11 +116,11 @@ pub fn char(c: char) -> impl Parser<Output = char> {
         let after = input.subtendril(len, input.len32() - len);
         Ok((c, after))
     } else {
-        Err(ParseError::Bad)
+        Err(ParseError::ReachedEof)
     }
 }
 
-pub fn and<A, B>(mut a: A, mut b: B) -> impl Parser<Output = (A::Output, B::Output)>
+pub fn and<A, B>(a: A, b: B) -> impl Parser<Output = (A::Output, B::Output)>
 where
     A: Parser,
     B: Parser,
@@ -97,7 +132,7 @@ where
     }
 }
 
-pub fn ignore_and<A, B>(mut a: A, mut b: B) -> impl Parser<Output = B::Output>
+pub fn ignore_and<A, B>(a: A, b: B) -> impl Parser<Output = B::Output>
 where
     A: Parser,
     B: Parser,
@@ -109,7 +144,7 @@ where
     }
 }
 
-pub fn and_ignore<A, B>(mut a: A, mut b: B) -> impl Parser<Output = A::Output>
+pub fn and_ignore<A, B>(a: A, b: B) -> impl Parser<Output = A::Output>
 where
     A: Parser,
     B: Parser,
@@ -121,7 +156,7 @@ where
     }
 }
 
-pub fn or<R, A, B>(mut a: A, mut b: B) -> impl Parser<Output = R>
+pub fn or<R, A, B>(a: A, b: B) -> impl Parser<Output = R>
 where
     A: Parser<Output = R>,
     B: Parser<Output = R>,
@@ -133,7 +168,7 @@ where
     }
 }
 
-pub fn optional<A>(mut a: A) -> impl Parser<Output = Option<A::Output>>
+pub fn optional<A>(a: A) -> impl Parser<Output = Option<A::Output>>
 where
     A: Parser,
 {
@@ -143,7 +178,7 @@ where
     }
 }
 
-pub fn map<I, O, A, F>(mut a: A, f: F) -> impl Parser<Output = O>
+pub fn map<I, O, A, F>(a: A, f: F) -> impl Parser<Output = O>
 where
     A: Parser<Output = I>,
     F: Fn(I) -> O,
@@ -154,22 +189,35 @@ where
     }
 }
 
-pub fn memoize<R, A>(mut a: A) -> impl Parser<Output = R>
+
+// TODO: this is unsound.
+pub fn memoize<R, A>(a: A) -> impl Parser<Output = R>
 where
     R: Clone,
     A: Parser<Output = R>,
 {
     use std::collections::HashMap;
     use std::mem::transmute;
-    let mut map: HashMap<usize, ParseResult<A::Output>> = HashMap::new();
+    let map: HashMap<usize, ParseResult<A::Output>> = HashMap::new();
+    let cell = RefCell::new(map);
 
     move |input: StrTendril| {
         let input_ptr: usize = unsafe { transmute(input.as_ref().as_ptr()) };
+        // lookup
+        {
+            let map = cell.borrow();
+            if let Some(res) = map.get(&input_ptr) {
+                return res.clone();
+            }
+        }
+
         let r = a.parse(input);
-        map.insert(input_ptr, r.clone());
+        // store
+        cell.borrow_mut().insert(input_ptr, r.clone());
         r
     }
 }
+
 
 pub fn surround_chars<A>(left: char, a: A, right: char) -> impl Parser<Output = A::Output>
 where
@@ -188,20 +236,20 @@ where
 }
 
 
-/*
-pub fn self_reference<F, A>(f: F) -> impl Parser<Output = A::Output> 
-where F: FnOnce(A) -> A,
-      A: Parser,
-      A::Output: 'static
+// TODO: test this please oh god
+pub fn self_reference<O, R, F>(f: F) -> impl Parser<Output = O>
+where
+    F: FnOnce(Box<Parser<Output=O>>) -> R,
+    R: Parser<Output=O> + 'static,
+    O: 'static
 {
-    let mut parser: Option<Box<Parser<Output=A::Output>>> = None;
-
-    let result = move |input| {
-        parser.as_mut().unwrap().parse(input)
-    };
-
-    parser = Some(Box::new(result));
-
-    result 
+    let parser = Rc::new(RefCell::new(None));
+    let weak = Rc::downgrade(&parser);
+    *parser.borrow_mut() = Some(Box::new(f(Box::new(weak))) as Box<Parser<Output=O> + 'static>);
+    parser
 }
-*/
+
+pub fn shared<A>(a: A) -> impl Parser<Output = A::Output> + Clone
+where A: Parser + 'static {
+    Rc::new(a) as Rc<Parser<Output = A::Output>>
+}
