@@ -1,11 +1,11 @@
 #![feature(conservative_impl_trait)]
-// extern crate tendril;
+extern crate tendril;
 
 pub mod utilities;
 #[cfg(test)]
 pub mod test;
 
-//use tendril::StrTendril;
+use tendril::StrTendril;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -15,7 +15,7 @@ pub enum ParseError {
     ReachedEof,
     DidNotReachEof,
     Not(&'static str),
-    NotS(String),
+    ExpectedOther(StrTendril),
     Alternate(Vec<ParseError>),
 }
 
@@ -40,31 +40,31 @@ impl ParseError {
     }
 }
 
-pub type ParseResult<'a, T> = Result<(T, &'a str), ParseError>;
+pub type ParseResult<T> = Result<(T, StrTendril), ParseError>;
 
-pub trait Parser<'a> {
+pub trait Parser {
     type Output;
 
-    fn parse(&self, input: &'a str) -> ParseResult<'a, Self::Output>;
+    fn parse(&self, input: StrTendril) -> ParseResult<Self::Output>;
 }
 
-impl<'a, O> Parser<'a> for Box<Parser<'a, Output = O>> {
+impl<O> Parser for Box<Parser<Output = O>> {
     type Output = O;
-    fn parse(&self, input: &'a str) -> ParseResult<'a, O> {
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
         (&**self).parse(input)
     }
 }
 
-impl<'a, O> Parser<'a> for Rc<Parser<'a, Output = O>> {
+impl<O> Parser for Rc<Parser<Output = O>> {
     type Output = O;
-    fn parse(&self, input: &'a str) -> ParseResult<'a, O> {
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
         (&**self).parse(input)
     }
 }
 
-impl<'a, O> Parser<'a> for Rc<RefCell<Option<Box<Parser<'a, Output = O>>>>> {
+impl<O> Parser for Rc<RefCell<Option<Box<Parser<Output = O>>>>> {
     type Output = O;
-    fn parse(&self, input: &'a str) -> ParseResult<'a, O> {
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
         match self.borrow().as_ref() {
             Some(parse_box) => parse_box.parse(input),
             None => Err(ParseError::RcKerfluffle),
@@ -73,9 +73,9 @@ impl<'a, O> Parser<'a> for Rc<RefCell<Option<Box<Parser<'a, Output = O>>>>> {
 }
 
 
-impl<'a, O> Parser<'a> for Weak<RefCell<Option<Box<Parser<'a, Output = O>>>>> {
+impl<O> Parser for Weak<RefCell<Option<Box<Parser<Output = O>>>>> {
     type Output = O;
-    fn parse(&self, input: &'a str) -> ParseResult<'a, O> {
+    fn parse(&self, input: StrTendril) -> ParseResult<O> {
         match self.upgrade() {
             Some(rc) => {
                 match rc.borrow().as_ref() {
@@ -88,42 +88,42 @@ impl<'a, O> Parser<'a> for Weak<RefCell<Option<Box<Parser<'a, Output = O>>>>> {
     }
 }
 
-impl<'a, R, F> Parser<'a> for F
+impl<R, F> Parser for F
 where
-    F: Fn(&'a str) -> ParseResult<'a, R>,
+    F: Fn(StrTendril) -> ParseResult<R>,
 {
     type Output = R;
-    fn parse(&self, input: &'a str) -> ParseResult<'a, R> {
+    fn parse(&self, input: StrTendril) -> ParseResult<R> {
         self(input)
     }
 }
 
-pub fn string<'a, S: Into<String>>(s: S) -> impl Parser<'a, Output = &'a str> {
-    let s: String = s.into();
-    move |input: &'a str| if input.starts_with(&s[..]) {
-        let (before, after) = input.split_at(s.len());
+pub fn string<S: Into<StrTendril>>(s: S) -> impl Parser<Output = StrTendril> {
+    let s = s.into();
+    move |input: StrTendril| if input.as_ref().starts_with(s.as_ref()) {
+        let len = s.len32();
+        let before = input.subtendril(0, len);
+        let after = input.subtendril(len, input.len32() - len);
         Ok((before, after))
     } else {
-        Err(ParseError::NotS(s.clone()))
+        Err(ParseError::ExpectedOther(s.clone()))
     }
 }
 
-pub fn char<'a>(c: char) -> impl Parser<'a, Output = char> {
-    move |input: &'a str| {
-        if input.chars().next() == Some(c) {
-            let len = c.len_utf8();
-            let after = &input[len..];
-            Ok((c, after))
-        } else {
-            Err(ParseError::ReachedEof)
-        }
+pub fn char(c: char) -> impl Parser<Output = char> {
+    move |input: StrTendril| if input.as_ref().chars().next() == Some(c) {
+        let len = c.len_utf8() as u32;
+        let after = input.subtendril(len, input.len32() - len);
+        Ok((c, after))
+    } else {
+        Err(ParseError::ReachedEof)
     }
 }
 
-pub fn and<'a, A, B>(a: A, b: B) -> impl Parser<'a, Output = (A::Output, B::Output)>
+pub fn and<A, B>(a: A, b: B) -> impl Parser<Output = (A::Output, B::Output)>
 where
-    A: Parser<'a>,
-    B: Parser<'a>,
+    A: Parser,
+    B: Parser,
 {
     move |input| {
         let (r_a, input) = a.parse(input)?;
@@ -132,24 +132,10 @@ where
     }
 }
 
-pub fn and_then<'a, A, B, F>(a: A, f: F) -> impl Parser<'a, Output = B::Output>
+pub fn ignore_and<A, B>(a: A, b: B) -> impl Parser<Output = B::Output>
 where
-    A: Parser<'a>,
-    B: Parser<'a>,
-    F: Fn(A::Output) -> B
-{
-    move |input| {
-        let (r_a, input) = a.parse(input)?;
-        let b = f(r_a);
-        let (r_b, input) = b.parse(input)?;
-        Ok((r_b, input))
-    }
-}
-
-pub fn ignore_and<'a, A, B>(a: A, b: B) -> impl Parser<'a, Output = B::Output>
-where
-    A: Parser<'a>,
-    B: Parser<'a>,
+    A: Parser,
+    B: Parser,
 {
     move |input| {
         let (_, input) = a.parse(input)?;
@@ -158,10 +144,10 @@ where
     }
 }
 
-pub fn and_ignore<'a, A, B>(a: A, b: B) -> impl Parser<'a, Output = A::Output>
+pub fn and_ignore<A, B>(a: A, b: B) -> impl Parser<Output = A::Output>
 where
-    A: Parser<'a>,
-    B: Parser<'a>,
+    A: Parser,
+    B: Parser,
 {
     move |input| {
         let (r, input) = a.parse(input)?;
@@ -170,31 +156,31 @@ where
     }
 }
 
-pub fn or<'a, R, A, B>(a: A, b: B) -> impl Parser<'a, Output = R>
+pub fn or<R, A, B>(a: A, b: B) -> impl Parser<Output = R>
 where
-    A: Parser<'a, Output = R>,
-    B: Parser<'a, Output = R>,
+    A: Parser<Output = R>,
+    B: Parser<Output = R>,
 {
-    move |input: &'a str| {
+    move |input: StrTendril| {
         a.parse(input.clone()).or_else(|e| {
             b.parse(input).map_err(|a| a.combine(e))
         })
     }
 }
 
-pub fn optional<'a, A>(a: A) -> impl Parser<'a, Output = Option<A::Output>>
+pub fn optional<A>(a: A) -> impl Parser<Output = Option<A::Output>>
 where
-    A: Parser<'a>,
+    A: Parser,
 {
-    move |input: &'a str| match a.parse(input.clone()) {
+    move |input: StrTendril| match a.parse(input.clone()) {
         Ok((r, next)) => Ok((Some(r), next)),
         Err(_) => Ok((None, input)),
     }
 }
 
-pub fn map<'a, I, O, A, F>(a: A, f: F) -> impl Parser<'a, Output = O>
+pub fn map<I, O, A, F>(a: A, f: F) -> impl Parser<Output = O>
 where
-    A: Parser<'a, Output = I>,
+    A: Parser<Output = I>,
     F: Fn(I) -> O,
 {
     move |input| match a.parse(input) {
@@ -204,7 +190,6 @@ where
 }
 
 
-/*
 // TODO: this is unsound.
 pub fn memoize<R, A>(a: A) -> impl Parser<Output = R>
 where
@@ -216,7 +201,7 @@ where
     let map: HashMap<usize, ParseResult<A::Output>> = HashMap::new();
     let cell = RefCell::new(map);
 
-    move |input: | {
+    move |input: StrTendril| {
         let input_ptr: usize = unsafe { transmute(input.as_ref().as_ptr()) };
         // lookup
         {
@@ -231,55 +216,50 @@ where
         cell.borrow_mut().insert(input_ptr, r.clone());
         r
     }
-}*/
+}
 
 
-pub fn surround_chars<'a, A>(left: char, a: A, right: char) -> impl Parser<'a, Output = A::Output>
+pub fn surround_chars<A>(left: char, a: A, right: char) -> impl Parser<Output = A::Output>
 where
-    A: Parser<'a>,
+    A: Parser,
 {
     and_ignore(ignore_and(char(left), a), char(right))
 }
 
-/*
-pub fn surround_string<'a, A>(left: &'a str, a: A, right: &'a str) -> impl Parser<'a, Output = A::Output>
+pub fn surround_string<L, R, A>(left: L, a: A, right: R) -> impl Parser<Output = A::Output>
 where
-    A: Parser<'a>,
+    L: Into<StrTendril>,
+    R: Into<StrTendril>,
+    A: Parser,
 {
     and_ignore(ignore_and(string(left), a), string(right))
-}*/
-
+}
 
 
 // TODO: test this please oh god
-pub fn self_reference<'a, O, R, F>(f: F) -> impl Parser<'a, Output = O>
+pub fn self_reference<O, R, F>(f: F) -> impl Parser<Output = O>
 where
     F: FnOnce(Box<Parser<Output = O>>) -> R,
-    R: Parser<'a, Output = O> + 'static,
+    R: Parser<Output = O> + 'static,
     O: 'static,
 {
     let parser = Rc::new(RefCell::new(None));
     let weak = Rc::downgrade(&parser);
-
-    let f = |input: &'a str| {
-        weak.parse(input)
-    };
-
-    *parser.borrow_mut() = Some(Box::new(f) as Box<Parser<'a, Output = O>>);
-
+    *parser.borrow_mut() = Some(Box::new(f(Box::new(weak))) as
+        Box<Parser<Output = O> + 'static>);
     parser
 }
 
-pub fn shared<'a, A>(a: A) -> impl Parser<'a, Output = A::Output> + Clone
+pub fn shared<A>(a: A) -> impl Parser<Output = A::Output> + Clone
 where
-    A: Parser<'a> + 'static,
+    A: Parser + 'static,
 {
     Rc::new(a) as Rc<Parser<Output = A::Output>>
 }
 
-pub fn many<'a, A>(a: A) -> impl Parser<'a, Output = Vec<A::Output>>
-where A: Parser<'a> {
-    move |mut input: &'a str| {
+pub fn many<A>(a: A) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser {
+    move |mut input: StrTendril| {
         let mut out = vec![];
         loop {
             match a.parse(input.clone()) {
@@ -294,9 +274,9 @@ where A: Parser<'a> {
     }
 }
 
-pub fn many1<'a, A>(a: A) -> impl Parser<'a, Output = Vec<A::Output>>
-where A: Parser<'a> {
-    move |mut input: &'a str| {
+pub fn many1<A>(a: A) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser {
+    move |mut input: StrTendril| {
         let mut out = vec![];
         loop {
             match a.parse(input.clone()) {
@@ -317,10 +297,10 @@ where A: Parser<'a> {
     }
 }
 
-pub fn many_sep<'a, A, B>(a: A, sep: B) -> impl Parser<'a, Output = Vec<A::Output>>
-where A: Parser<'a>,
-      B: Parser<'a> {
-    move |mut input: &'a str| {
+pub fn many_sep<A, B>(a: A, sep: B) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser,
+      B: Parser {
+    move |mut input: StrTendril| {
         let mut out = vec![];
         loop {
             match a.parse(input.clone()) {
@@ -339,10 +319,10 @@ where A: Parser<'a>,
     }
 }
 
-pub fn many1_sep<'a, A, B>(a: A, sep: B) -> impl Parser<'a, Output = Vec<A::Output>>
-where A: Parser<'a>,
-      B: Parser<'a> {
-    move |mut input: &'a str| {
+pub fn many1_sep<A, B>(a: A, sep: B) -> impl Parser<Output = Vec<A::Output>>
+where A: Parser,
+      B: Parser {
+    move |mut input: StrTendril| {
         let mut out = vec![];
         loop {
             match a.parse(input.clone()) {

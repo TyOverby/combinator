@@ -1,26 +1,28 @@
 use super::*;
 use super::utilities::*;
 
-fn parse_ok<'a, P>(input: &'a str, parser: P) -> P::Output
+fn parse_ok<P>(input: &str, parser: P) -> P::Output
 where
-    P: Parser<'a>,
+    P: Parser,
 {
     parser.parse(input.into()).unwrap().0
 }
 
-fn parse_err<'a, P>(input: &'a str, parser: P)
+fn parse_err<P>(input: &str, parser: P)
 where
-    P: Parser<'a>,
+    P: Parser,
 {
     assert!(parser.parse(input.into()).is_err());
 }
 
 #[test]
 fn basic_string_parser() {
-    assert_eq!(parse_ok("abc", string("abc")), "abc");
+    assert_eq!(parse_ok("abc", string("abc")), "abc".into());
 
-    assert_eq!(parse_ok("abcdef", and(string("abc"), string("def"))), 
-               ("abc", "def"));
+    assert_eq!(parse_ok("abcdef", and(string("abc"), string("def"))), (
+        "abc".into(),
+        "def".into(),
+    ));
 
     parse_err("xyz", string("abc"));
     parse_err("ab", string("abc"));
@@ -36,7 +38,6 @@ fn basic_char_parser() {
     parse_err("a", and(char('a'), char('b')));
 }
 
-/*
 #[test]
 fn rec() {
     let o = self_reference(|recurse| {
@@ -60,27 +61,26 @@ fn rec() {
     assert_eq!(parse_ok("((()))", p.clone()), 3);
     */
 }
-*/
 
 #[test]
 fn ident() {
-    assert_eq!(parse_ok("abc_123", identifier), "abc_123");
-    assert_eq!(parse_ok("_abc", identifier), "_abc");
+    assert_eq!(parse_ok("abc_123", identifier), "abc_123".into());
+    assert_eq!(parse_ok("_abc", identifier), "_abc".into());
     parse_err("123abc", identifier);
 }
 
 #[test]
 fn str_lit() {
-    assert_eq!(parse_ok("\"abc123\"", string_literal), "abc123");
+    assert_eq!(parse_ok("\"abc123\"", string_literal), "abc123".into());
     assert_eq!(
         parse_ok("\"abc\\\"123\"", string_literal),
-        "abc\\\"123"
+        "abc\\\"123".into()
     );
     assert_eq!(
         parse_ok(
             "\"abc\"\"123\"", 
             and(string_literal, string_literal)), 
-        ("abc".into(), "123"));
+        ("abc".into(), "123".into()));
     parse_err("\"foo", string_literal);
     parse_err("foo", string_literal);
 }
@@ -161,11 +161,4 @@ fn many1_sep_test() {
     assert_eq!(parse_ok("1,2,3", many1_sep(digit, char(','))), vec![1,2,3]);
     assert_eq!(parse_ok("1", many1_sep(digit, char(','))), vec![1]);
     parse_err("", many1_sep(digit, char(',')));
-}
-
-#[test]
-fn and_then_test() {
-    let dup2 = shared(and_then(alpha, |p| char(p)));
-    assert_eq!(parse_ok("aa", dup2.clone()), 'a');
-    parse_err("ab", dup2.clone());
 }
