@@ -1,45 +1,49 @@
-use super::{ParseResult, ParseError};
-use tendril::StrTendril;
+use super::{ParseResult, ParseError, Position};
 
-fn after(tendril: StrTendril, n: u32) -> StrTendril {
-    tendril.subtendril(n, tendril.len32() - n)
-}
-
-pub fn digit(input: StrTendril) -> ParseResult<u8> {
+pub fn digit(input: &str, position: Position) -> ParseResult<u8> {
     match input.chars().next() {
-        Some('0') => Ok((0, after(input, 1))),
-        Some('1') => Ok((1, after(input, 1))),
-        Some('2') => Ok((2, after(input, 1))),
-        Some('3') => Ok((3, after(input, 1))),
-        Some('4') => Ok((4, after(input, 1))),
-        Some('5') => Ok((5, after(input, 1))),
-        Some('6') => Ok((6, after(input, 1))),
-        Some('7') => Ok((7, after(input, 1))),
-        Some('8') => Ok((8, after(input, 1))),
-        Some('9') => Ok((9, after(input, 1))),
+        Some('0') => Ok((0, &input[1..], Position)),
+        Some('1') => Ok((1, &input[1..], Position)),
+        Some('2') => Ok((2, &input[1..], Position)),
+        Some('3') => Ok((3, &input[1..], Position)),
+        Some('4') => Ok((4, &input[1..], Position)),
+        Some('5') => Ok((5, &input[1..], Position)),
+        Some('6') => Ok((6, &input[1..], Position)),
+        Some('7') => Ok((7, &input[1..], Position)),
+        Some('8') => Ok((8, &input[1..], Position)),
+        Some('9') => Ok((9, &input[1..], Position)),
 
-        Some(_) => Err(ParseError::Not("number")),
+        Some(_) => Err(ParseError::ExpectedDetail {
+            detail: "number",
+            position: position,
+        }),
         None => Err(ParseError::ReachedEof),
     }
 }
 
-pub fn alpha(input: StrTendril) -> ParseResult<char> {
+pub fn alpha(input: &str, position: Position) -> ParseResult<char> {
     match input.chars().next() {
-        Some(c) if c.is_alphabetic() => Ok((c, after(input, c.len_utf8() as u32))),
-        Some(_) => Err(ParseError::Not("alphabetic")),
+        Some(c) if c.is_alphabetic() => Ok((c, &input[c.len_utf8()..], Position)),
+        Some(_) => Err(ParseError::ExpectedDetail{ 
+            detail: "alphabetic",
+            position: position,
+        }),
         None => Err(ParseError::ReachedEof),
     }
 }
 
-pub fn alphanumeric(input: StrTendril) -> ParseResult<char> {
+pub fn alphanumeric(input: &str, position: Position) -> ParseResult<char> {
     match input.chars().next() {
-        Some(c) if c.is_alphanumeric() => Ok((c, after(input, c.len_utf8() as u32))),
-        Some(_) => Err(ParseError::Not("alphanumeric")),
+        Some(c) if c.is_alphanumeric() => Ok((c, &input[c.len_utf8()..], Position)),
+        Some(_) => Err(ParseError::ExpectedDetail { 
+            detail: "alphanumeric",
+            position: position,
+        }),
         None => Err(ParseError::ReachedEof),
     }
 }
 
-pub fn identifier(input: StrTendril) -> ParseResult<StrTendril> {
+pub fn identifier(input: &str, position: Position) -> ParseResult<&str> {
     let mut end = 0;
 
     for c in input.chars() {
@@ -59,15 +63,17 @@ pub fn identifier(input: StrTendril) -> ParseResult<StrTendril> {
     }
 
     if end == 0 {
-        Err(ParseError::Not("identifier"))
+        Err(ParseError::ExpectedDetail {
+            detail: "identifier",
+            position: position,
+        })
     } else {
-        let left = input.subtendril(0, end as u32);
-        let right = after(input, end as u32);
-        Ok((left, right))
+        let (left, right) = input.split_at(end);
+        Ok((left, right, Position))
     }
 }
 
-pub fn string_literal(input: StrTendril) -> ParseResult<StrTendril> {
+pub fn string_literal(input: &str, position: Position) -> ParseResult<&str> {
     let mut escaped = false;
     let mut end = 0;
     let mut first = true;
@@ -76,12 +82,16 @@ pub fn string_literal(input: StrTendril) -> ParseResult<StrTendril> {
     for c in input.chars() {
         if first {
             if c != '"' {
-                return Err(ParseError::Not("opening quote"));
+                return Err(ParseError::ExpectedDetail{
+                    detail: "opening quote",
+                    position: position
+                });
             }
             first = false;
             continue;
         }
 
+        end += c.len_utf8();
         match c {
             '\\' => {
                 escaped = !escaped;
@@ -95,15 +105,17 @@ pub fn string_literal(input: StrTendril) -> ParseResult<StrTendril> {
             }
             _ => {}
         }
-        end += c.len_utf8();
     }
 
     if !is_closed {
-        return Err(ParseError::Not("closing quote"));
+        return Err(ParseError::ExpectedDetail{
+            detail: "closing quote",
+            position: position,
+        });
     }
 
-    let quote_size = '"'.len_utf8() as u32;
-    let left = input.subtendril(quote_size, end as u32);
-    let right = after(input, 2 * quote_size + end as u32);
-    Ok((left, right))
+    let quote_size = '"'.len_utf8();
+    let left = &input[quote_size .. end];
+    let right = &input[(quote_size + end) ..];
+    Ok((left, right, Position))
 }
