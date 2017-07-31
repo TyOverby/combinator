@@ -1,4 +1,5 @@
 use super::{ParseResult, ParseError};
+//use tendril::StrTendril;
 
 pub fn digit<'a>(input: &'a str) -> ParseResult<'a, u8> {
     match input.chars().next() {
@@ -98,7 +99,6 @@ pub fn string_literal<'a>(input: &'a str) -> ParseResult<'a, &'a str> {
 
     let quote_size = '"'.len_utf8();
     let left = &input[quote_size .. end + 1];
-
     let right = &input[(2 * quote_size + end) ..];
     Ok((left, right))
 }
