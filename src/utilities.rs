@@ -78,6 +78,8 @@ pub fn identifier(input: &[u8], position: Position) -> ParseResult<&str> {
         })
     } else {
         let (left, right) = input.split_at(end);
+
+        // Safe because all the chars that we allow are valid utf8
         let left = unsafe {  ::std::str::from_utf8_unchecked(left) };
         Ok((left, right, Position))
     }

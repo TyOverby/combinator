@@ -22,6 +22,10 @@ pub enum ParseError {
         expected: char,
         position: Position,
     },
+    ExpectedByte {
+        expected: u8,
+        position: Position,
+    },
     ExpectedDetail {
         detail: &'static str,
         position: Position
@@ -63,11 +67,30 @@ impl <'c, 'r> Parser<'r> for &'c str {
         let s = *self;
         if input.starts_with(s.as_bytes()) {
             let (before, after) = input.split_at(s.len());
+            // Safe because the str is valid utf8, so the byte string must also be valid utf8
             let before = unsafe{ ::std::str::from_utf8_unchecked(before) };
             Ok((before, after, Position))
         } else {
             Err(ParseError::ExpectedBytes {
                 expected: s.into(),
+                position: position,
+            })
+        }
+    }
+}
+
+impl <'r> Parser<'r> for u8 {
+    type Out = u8;
+
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, Self::Out> {
+        let c = *self;
+
+        if input.starts_with(&[c]) {
+            let after = &input[..1];
+            Ok((c, after, Position))
+        } else {
+            Err(ParseError::ExpectedByte {
+                expected: c,
                 position: position,
             })
         }
