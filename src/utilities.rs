@@ -1,17 +1,17 @@
 use super::{ParseResult, ParseError, Position};
 
-pub fn digit(input: &str, position: Position) -> ParseResult<u8> {
-    match input.chars().next() {
-        Some('0') => Ok((0, &input[1..], Position)),
-        Some('1') => Ok((1, &input[1..], Position)),
-        Some('2') => Ok((2, &input[1..], Position)),
-        Some('3') => Ok((3, &input[1..], Position)),
-        Some('4') => Ok((4, &input[1..], Position)),
-        Some('5') => Ok((5, &input[1..], Position)),
-        Some('6') => Ok((6, &input[1..], Position)),
-        Some('7') => Ok((7, &input[1..], Position)),
-        Some('8') => Ok((8, &input[1..], Position)),
-        Some('9') => Ok((9, &input[1..], Position)),
+pub fn digit(input: &[u8], position: Position) -> ParseResult<u8> {
+    match input.first().map(|&x|x) {
+        Some(b'0') => Ok((0, &input[1..], Position)),
+        Some(b'1') => Ok((1, &input[1..], Position)),
+        Some(b'2') => Ok((2, &input[1..], Position)),
+        Some(b'3') => Ok((3, &input[1..], Position)),
+        Some(b'4') => Ok((4, &input[1..], Position)),
+        Some(b'5') => Ok((5, &input[1..], Position)),
+        Some(b'6') => Ok((6, &input[1..], Position)),
+        Some(b'7') => Ok((7, &input[1..], Position)),
+        Some(b'8') => Ok((8, &input[1..], Position)),
+        Some(b'9') => Ok((9, &input[1..], Position)),
 
         Some(_) => Err(ParseError::ExpectedDetail {
             detail: "number",
@@ -21,41 +21,50 @@ pub fn digit(input: &str, position: Position) -> ParseResult<u8> {
     }
 }
 
-pub fn alpha(input: &str, position: Position) -> ParseResult<char> {
-    match input.chars().next() {
-        Some(c) if c.is_alphabetic() => Ok((c, &input[c.len_utf8()..], Position)),
-        Some(_) => Err(ParseError::ExpectedDetail{ 
-            detail: "alphabetic",
+pub fn alpha(input: &[u8], position: Position) -> ParseResult<char> {
+    if input.len() == 0 {
+        return Err(ParseError::ReachedEof) 
+    } 
+
+    match input[0] {
+        b'a' ... b'z' => Ok((input[0] as char, &input[1..], Position)),
+        b'A' ... b'Z' => Ok((input[0] as char, &input[1..], Position)),
+        _ => Err(ParseError::ExpectedDetail {
+            detail: "alphabetic character",
             position: position,
-        }),
-        None => Err(ParseError::ReachedEof),
+        })
     }
 }
 
-pub fn alphanumeric(input: &str, position: Position) -> ParseResult<char> {
-    match input.chars().next() {
-        Some(c) if c.is_alphanumeric() => Ok((c, &input[c.len_utf8()..], Position)),
-        Some(_) => Err(ParseError::ExpectedDetail { 
-            detail: "alphanumeric",
+pub fn alphanumeric(input: &[u8], position: Position) -> ParseResult<char> {
+    if input.len() == 0 {
+        return Err(ParseError::ReachedEof) 
+    } 
+
+    match input[0] {
+        b'a' ... b'z' => Ok((input[0] as char, &input[1..], Position)),
+        b'A' ... b'Z' => Ok((input[0] as char, &input[1..], Position)),
+        b'0' ... b'9' => Ok((input[0] as char, &input[1..], Position)),
+        _ => Err(ParseError::ExpectedDetail {
+            detail: "alphanumeric character",
             position: position,
-        }),
-        None => Err(ParseError::ReachedEof),
+        })
     }
 }
 
-pub fn identifier(input: &str, position: Position) -> ParseResult<&str> {
+pub fn identifier(input: &[u8], position: Position) -> ParseResult<&str> {
     let mut end = 0;
 
-    for c in input.chars() {
+    for c in input.iter().cloned() {
         if end == 0 {
-            if c.is_alphabetic() || c == '_' {
-                end += c.len_utf8();
+            if ((c >= b'a') && (c <= b'z')) || ((c >= b'A') && (c <= b'Z')) || c == b'_' {
+                end += 1;
             } else {
                 break;
             }
         } else {
-            if c.is_alphanumeric() || c == '_' {
-                end += c.len_utf8();
+            if (c >= b'0') && (c <= b'9') || ((c >= b'a') && (c <= b'z')) || ((c >= b'A') && (c <= b'Z')) || c == b'_' {
+                end += 1;
             } else {
                 break;
             }
@@ -69,19 +78,20 @@ pub fn identifier(input: &str, position: Position) -> ParseResult<&str> {
         })
     } else {
         let (left, right) = input.split_at(end);
+        let left = unsafe {  ::std::str::from_utf8_unchecked(left) };
         Ok((left, right, Position))
     }
 }
 
-pub fn string_literal(input: &str, position: Position) -> ParseResult<&str> {
+pub fn string_literal(input: &[u8], position: Position) -> ParseResult<&[u8]> {
     let mut escaped = false;
     let mut end = 0;
     let mut first = true;
     let mut is_closed = false;
 
-    for c in input.chars() {
+    for c in input.iter().cloned() {
         if first {
-            if c != '"' {
+            if c != b'"' {
                 return Err(ParseError::ExpectedDetail{
                     detail: "opening quote",
                     position: position
@@ -91,12 +101,12 @@ pub fn string_literal(input: &str, position: Position) -> ParseResult<&str> {
             continue;
         }
 
-        end += c.len_utf8();
+        end += 1;
         match c {
-            '\\' => {
+            b'\\' => {
                 escaped = !escaped;
             }
-            '"' if !escaped => {
+            b'"' if !escaped => {
                 is_closed = true;
                 break;
             }

@@ -14,6 +14,10 @@ pub enum ParseError {
         expected: String,
         position: Position,
     },
+    ExpectedBytes{
+        expected: Vec<u8>,
+        position: Position,
+    },
     ExpectedChar {
         expected: char,
         position: Position,
@@ -25,26 +29,44 @@ pub enum ParseError {
     ReachedEof,
 }
 
-pub type ParseResult<'a, T> = Result<(T, &'a str, Position), ParseError>;
+pub type ParseResult<'a, T> = Result<(T, &'a [u8], Position), ParseError>;
 
 #[derive(Clone, Debug)]
 pub struct Position;
 
 pub trait Parser<'a> {
     type Out;
-    fn parse(&self, input: &'a str, position: Position) -> ParseResult<'a, Self::Out>;
+    fn parse(&self, input: &'a [u8], position: Position) -> ParseResult<'a, Self::Out>;
 }
 
-impl <'c, 'r> Parser<'r> for &'c str {
-    type Out = &'r str;
+impl <'c, 'r> Parser<'r> for &'c [u8] {
+    type Out = &'r [u8];
 
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, Self::Out> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, Self::Out> {
         let s = *self;
         if input.starts_with(s) {
             let (before, after) = input.split_at(s.len());
             Ok((before, after, Position))
         } else {
-            Err(ParseError::ExpectedString{
+            Err(ParseError::ExpectedBytes {
+                expected: s.into(),
+                position: position,
+            })
+        }
+    }
+}
+
+impl <'c, 'r> Parser<'r> for &'c str {
+    type Out = &'r str;
+
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, Self::Out> {
+        let s = *self;
+        if input.starts_with(s.as_bytes()) {
+            let (before, after) = input.split_at(s.len());
+            let before = unsafe{ ::std::str::from_utf8_unchecked(before) };
+            Ok((before, after, Position))
+        } else {
+            Err(ParseError::ExpectedBytes {
                 expected: s.into(),
                 position: position,
             })
@@ -55,9 +77,12 @@ impl <'c, 'r> Parser<'r> for &'c str {
 impl <'r> Parser<'r> for char {
     type Out = char;
 
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, Self::Out> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, Self::Out> {
         let c = *self;
-        if input.starts_with(c) {
+        let mut stack_char = [0u8; 4];
+        let encoded_len = c.encode_utf8(&mut stack_char).len();
+
+        if input.starts_with(&stack_char[..encoded_len]) {
             let (_, after) = input.split_at(c.len_utf8());
             Ok((c, after, Position))
         } else {
@@ -70,10 +95,10 @@ impl <'r> Parser<'r> for char {
 }
 
 impl<'r, R, F> Parser<'r> for F
-where F: Fn(&'r str, Position) -> ParseResult<R>,
+where F: Fn(&'r [u8], Position) -> ParseResult<R>,
 {
     type Out = R;
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, R> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, R> {
         self(input, position)
     }
 }
@@ -81,7 +106,7 @@ where F: Fn(&'r str, Position) -> ParseResult<R>,
 impl<'r, R> Parser<'r> for Box<Parser<'r, Out=R>>
 {
     type Out = R;
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, R> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, R> {
         (**self).parse(input, position)
     }
 }
@@ -193,7 +218,7 @@ where
 impl<'r, P> Parser<'r> for Rc<RefCell<Option<P>>> 
 where P: Parser<'r> {
     type Out = P::Out;
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, P::Out> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, P::Out> {
         match self.borrow().as_ref() {
             Some(parse_box) => parse_box.parse(input, position),
             None => Err(ParseError::RcKerfluffle),
@@ -205,7 +230,7 @@ where P: Parser<'r> {
 impl<'r, P> Parser<'r> for Weak<RefCell<Option<P>>> 
 where P: Parser<'r> {
     type Out = P::Out;
-    fn parse(&self, input: &'r str, position: Position) -> ParseResult<'r, P::Out> {
+    fn parse(&self, input: &'r [u8], position: Position) -> ParseResult<'r, P::Out> {
         match self.upgrade() {
             Some(rc) => {
                 match rc.borrow().as_ref() {
